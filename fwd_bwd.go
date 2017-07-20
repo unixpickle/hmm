@@ -45,11 +45,3 @@ func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 	}()
 	return res
 }
-
-func addLogs(x1, x2 float64) float64 {
-	max := math.Max(x1, x2)
-	if math.IsInf(max, -1) {
-		return max
-	}
-	return math.Log(math.Exp(x1-max)+math.Exp(x2-max)) + max
-}
