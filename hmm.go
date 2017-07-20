@@ -1,4 +1,4 @@
-package anyhmm
+package hmm
 
 import (
 	"fmt"
