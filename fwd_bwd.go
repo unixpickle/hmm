@@ -9,22 +9,34 @@ import "math"
 // Probabilities are experssed in the log domain.
 // States with 0 probability are omitted.
 //
-// The caller should not modify the returned maps.
-//
 // The caller should read through the entire channel,
 // which is fed len(obs) items.
+// The caller may modify the returned maps.
 func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 	res := make(chan map[State]float64, 1)
 	distribution := h.Init
 	go func() {
 		defer close(res)
 		for _, o := range obs {
-			newDist := map[State]float64{}
-			emitProbs := h.Emitter.LogProbs(o, h.States)
+			// Compute P(X_i | Z_i)
+			emitProbs := h.Emitter.LogProbs(o, h.States...)
 			emitProbsMap := map[State]float64{}
 			for i, state := range h.States {
 				emitProbsMap[state] = emitProbs[i]
 			}
+
+			// Compute P(X_0:i, Z_i) from P(X_0:i-1, Z_i)
+			outJoints := map[State]float64{}
+			for state, prior := range distribution {
+				prob := prior + emitProbsMap[state]
+				if !math.IsInf(prob, -1) {
+					outJoints[state] = prob
+				}
+			}
+			res <- outJoints
+
+			// Compute P(X_0:i, Z_i+1)
+			newDist := map[State]float64{}
 			for trans, transProb := range h.Transitions {
 				prior, hasPrior := distribution[trans.From]
 				if !hasPrior {
@@ -39,7 +51,6 @@ func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 					}
 				}
 			}
-			res <- newDist
 			distribution = newDist
 		}
 	}()

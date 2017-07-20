@@ -92,7 +92,10 @@ type transSampler struct {
 }
 
 func newTransSampler(states []State, trans map[Transition]float64) *transSampler {
-	res := &transSampler{}
+	res := &transSampler{
+		Targets: map[State][]State{},
+		Probs:   map[State][]float64{},
+	}
 	for tr, logProb := range trans {
 		res.Targets[tr.From] = append(res.Targets[tr.From], tr.To)
 		res.Probs[tr.From] = append(res.Probs[tr.From], math.Exp(logProb))
