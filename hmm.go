@@ -19,8 +19,8 @@ type Transition struct {
 
 // HMM is a hidden Markov model.
 type HMM struct {
-	// States contains all allowed states.
-	States []State
+	States  []State
+	Emitter Emitter
 
 	// TerminalState is the state that signals the end of
 	// an observation chain.
@@ -30,9 +30,6 @@ type HMM struct {
 	// If TerminalState is nil, then probabilities are
 	// computed without accounting for termination.
 	TerminalState State
-
-	// Emitter provides emission probabilities.
-	Emitter Emitter
 
 	// Init stores the initial state distribution.
 	// It maps states to log probabilities.
