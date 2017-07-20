@@ -4,7 +4,7 @@ import "math/rand"
 
 func sampleIndex(gen *rand.Rand, probs []float64) int {
 	if len(probs) == 0 {
-		panic("cannot sample from empty lits")
+		panic("cannot sample from empty list")
 	}
 	var offset float64
 	if gen == nil {
