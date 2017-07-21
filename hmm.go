@@ -76,6 +76,29 @@ func (h *HMM) Sample(gen *rand.Rand) ([]State, []Obs) {
 	return states, obs
 }
 
+// SampleLen is like Sample, but it limits the sampled
+// sequence length.
+// Unlike Sample, SampleLen can be used without a terminal
+// state.
+func (h *HMM) SampleLen(gen *rand.Rand, maxLen int) ([]State, []Obs) {
+	var states []State
+	var obs []Obs
+
+	state := h.sampleStart(gen)
+
+	var ts *transSampler
+	for i := 0; i < maxLen && state != h.TerminalState; i++ {
+		states = append(states, state)
+		obs = append(obs, h.Emitter.Sample(gen, state))
+		if ts == nil {
+			ts = newTransSampler(h.States, h.Transitions)
+		}
+		state = ts.Sample(gen, state)
+	}
+
+	return states, obs
+}
+
 func (h *HMM) sampleStart(gen *rand.Rand) State {
 	var states []State
 	var probs []float64
