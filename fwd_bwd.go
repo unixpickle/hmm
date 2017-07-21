@@ -1,6 +1,9 @@
 package hmm
 
-import "math"
+import (
+	"math"
+	"sync"
+)
 
 // ForwardProbs computes, for each timestep i, for each
 // state y, the joint probability P(x,y) where x is the
@@ -116,5 +119,59 @@ func initialBackwardDist(h *HMM) map[State]float64 {
 			res[trans.From] = prob
 		}
 	}
+	return res
+}
+
+// A Smoother wraps the result of the forward-backward
+// algorithm to perform inference on latent variables.
+type Smoother struct {
+	ForwardOut  []map[State]float64
+	BackwardOut []map[State]float64
+}
+
+// NewSmoother creates a Smoother that performs hidden
+// state inference given the HMM and the observations.
+func NewSmoother(h *HMM, obs []Obs) *Smoother {
+	res := &Smoother{}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		for fwdOut := range ForwardProbs(h, obs) {
+			res.ForwardOut = append(res.ForwardOut, fwdOut)
+		}
+		wg.Done()
+	}()
+	go func() {
+		for bwdOut := range BackwardProbs(h, obs) {
+			res.BackwardOut = append(res.BackwardOut, bwdOut)
+		}
+		wg.Done()
+	}()
+	wg.Wait()
+	return res
+}
+
+// Dist returns the distribution of the hidden state at
+// time t.
+// Each state is mapped to its log probability.
+// States with zero probability may be absent.
+func (s *Smoother) Dist(t int) map[State]float64 {
+	res := map[State]float64{}
+	bwdDist := s.BackwardOut[len(s.BackwardOut)-(t+1)]
+	fwdDist := s.ForwardOut[t]
+	probsSum := math.Inf(-1)
+	for state, fwdProb := range fwdDist {
+		if bwdProb, ok := bwdDist[state]; ok {
+			prob := fwdProb + bwdProb
+			res[state] = prob
+			probsSum = addLogs(probsSum, prob)
+		}
+	}
+
+	// Divide by P(X1,...,Xn).
+	for state := range res {
+		res[state] -= probsSum
+	}
+
 	return res
 }

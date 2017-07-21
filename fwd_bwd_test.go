@@ -1,8 +1,15 @@
 package hmm
 
 import (
+	"fmt"
 	"math"
+	"math/rand"
+	"runtime"
 	"testing"
+
+	"github.com/unixpickle/approb"
+
+	"golang.org/x/net/context"
 )
 
 const (
@@ -119,6 +126,62 @@ func actualBackwardProbs(h *HMM, out []Obs) []map[State]float64 {
 			obj[k] = math.Exp(v)
 		}
 		res = append(res, obj)
+	}
+	return res
+}
+
+func TestSmoother(t *testing.T) {
+	h := testingHMM()
+	out := []Obs{"x", "z", "y", "x"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var samples [][]State
+	ch := sampleConditionalHidden(ctx, h, out)
+	for i := 0; i < 3000; i++ {
+		samples = append(samples, <-ch)
+	}
+	cancel()
+
+	stateToNum := map[State]float64{"A": 0, "B": 1, "C": 2, "D": 3}
+	smoother := NewSmoother(h, out)
+	for idx := range out {
+		t.Run(fmt.Sprintf("Time%d", idx), func(t *testing.T) {
+			dist := smoother.Dist(idx)
+			var states []State
+			var probs []float64
+			for state, prob := range dist {
+				states = append(states, state)
+				probs = append(probs, math.Exp(prob))
+			}
+			corr := approb.Correlation(15000, 0.5, func() float64 {
+				sample := samples[rand.Intn(len(samples))]
+				return stateToNum[sample[idx]]
+			}, func() float64 {
+				return stateToNum[states[sampleIndex(nil, probs)]]
+			})
+			if corr < 0.999 {
+				t.Errorf("correlation is %f (expected 1)", corr)
+			}
+		})
+	}
+}
+
+func sampleConditionalHidden(ctx context.Context, h *HMM, out []Obs) <-chan []State {
+	res := make(chan []State, runtime.GOMAXPROCS(0))
+	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+		go func() {
+			gen := rand.New(rand.NewSource(rand.Int63()))
+			for {
+				states, outs := h.Sample(gen)
+				if obsSeqsEqual(out, outs) {
+					select {
+					case res <- states:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}()
 	}
 	return res
 }
