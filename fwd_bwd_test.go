@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	TestSamples   = 500000
+	TestSamples   = 2000000
 	TestThreshold = 0.001
 )
 
@@ -52,6 +52,69 @@ func approxForwardProbs(h *HMM, out []Obs) []map[State]float64 {
 func actualForwardProbs(h *HMM, out []Obs) []map[State]float64 {
 	var res []map[State]float64
 	for obj := range ForwardProbs(h, out) {
+		for k, v := range obj {
+			obj[k] = math.Exp(v)
+		}
+		res = append(res, obj)
+	}
+	return res
+}
+
+func TestBackwardProbs(t *testing.T) {
+	h := testingHMM()
+	out := []Obs{"x", "z", "y", "x"}
+
+	expected := approxBackwardProbs(h, out)
+	actual := actualBackwardProbs(h, out)
+
+	if len(actual) != len(expected) {
+		t.Fatal("length mismatch")
+	}
+	for i, act := range actual {
+		exp := expected[i]
+		for _, state := range h.States {
+			a := act[state]
+			x := exp[state]
+			if (math.IsNaN(a) != math.IsNaN(x)) || math.Abs(a-x) > TestThreshold {
+				t.Errorf("time %d state %v: expected %v but got %v",
+					i, state, x, a)
+			}
+		}
+	}
+}
+
+func approxBackwardProbs(h *HMM, out []Obs) []map[State]float64 {
+	matches := make([]map[State]float64, len(out))
+	totals := map[State]float64{}
+	for i := range matches {
+		matches[i] = map[State]float64{}
+	}
+	for i := 0; i < TestSamples; i++ {
+		sampleState, sampleOut := h.Sample(nil)
+		for j := range sampleOut {
+			state := sampleState[len(sampleState)-(j+1)]
+			totals[state]++
+			if j >= len(out) {
+				continue
+			}
+			out1 := sampleOut[len(sampleOut)-j:]
+			out2 := out[len(out)-j:]
+			if obsSeqsEqual(out1, out2) {
+				matches[j][state]++
+			}
+		}
+	}
+	for _, subMatches := range matches {
+		for state := range subMatches {
+			subMatches[state] /= totals[state]
+		}
+	}
+	return matches
+}
+
+func actualBackwardProbs(h *HMM, out []Obs) []map[State]float64 {
+	var res []map[State]float64
+	for obj := range BackwardProbs(h, out) {
 		for k, v := range obj {
 			obj[k] = math.Exp(v)
 		}

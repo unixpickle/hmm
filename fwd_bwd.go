@@ -14,9 +14,9 @@ import "math"
 // The caller may modify the returned maps.
 func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 	res := make(chan map[State]float64, 1)
-	distribution := h.Init
 	go func() {
 		defer close(res)
+		distribution := h.Init
 		for _, o := range obs {
 			// Compute P(X_i | Z_i)
 			emitProbs := h.Emitter.LogProbs(o, h.States...)
@@ -35,7 +35,7 @@ func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 			}
 			res <- outJoints
 
-			// Compute P(X_0:i, Z_i+1)
+			// Compute P(X_0:i, Z_i+1) for all Z_i+1
 			newDist := map[State]float64{}
 			for trans, transProb := range h.Transitions {
 				prior, hasPrior := distribution[trans.From]
@@ -54,5 +54,67 @@ func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 			distribution = newDist
 		}
 	}()
+	return res
+}
+
+// BackwardProbs computes, for each timestep i, the
+// probability of the observations after timestep i given
+// each hidden state at timestep i.
+//
+// The timesteps in the channel are in reverse order,
+// starting at the last timestep going backward.
+//
+// See ForwardProbs for more on how to use the resulting
+// channel.
+func BackwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
+	res := make(chan map[State]float64, 1)
+	go func() {
+		defer close(res)
+		distribution := initialBackwardDist(h)
+		for i := len(obs) - 1; i >= 0; i-- {
+			// Compute P(X_i | Z_i)
+			emitProbs := h.Emitter.LogProbs(obs[i], h.States...)
+			emitProbsMap := map[State]float64{}
+			for i, state := range h.States {
+				emitProbsMap[state] = emitProbs[i]
+			}
+
+			// Compute P(X_i:n | Z_i-1) for all Z_i-1.
+			newDist := map[State]float64{}
+			for trans, transProb := range h.Transitions {
+				nextProb, hasNextProb := distribution[trans.To]
+				if !hasNextProb {
+					continue
+				}
+				prob := transProb + nextProb + emitProbsMap[trans.To]
+				if !math.IsInf(prob, -1) {
+					if lastProb, ok := newDist[trans.From]; ok {
+						newDist[trans.From] = addLogs(lastProb, prob)
+					} else {
+						newDist[trans.From] = prob
+					}
+				}
+			}
+
+			res <- distribution
+			distribution = newDist
+		}
+	}()
+	return res
+}
+
+func initialBackwardDist(h *HMM) map[State]float64 {
+	res := map[State]float64{}
+	if h.TerminalState == nil {
+		for _, state := range h.States {
+			res[state] = 0
+		}
+		return res
+	}
+	for trans, prob := range h.Transitions {
+		if trans.To == h.TerminalState {
+			res[trans.From] = prob
+		}
+	}
 	return res
 }
