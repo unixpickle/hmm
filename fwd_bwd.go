@@ -46,13 +46,7 @@ func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 					continue
 				}
 				destProb := prior + transProb + emitProbsMap[trans.From]
-				if !math.IsInf(destProb, -1) {
-					if oldProb, ok := newDist[trans.To]; ok {
-						newDist[trans.To] = addLogs(oldProb, destProb)
-					} else {
-						newDist[trans.To] = destProb
-					}
-				}
+				addToState(newDist, trans.To, destProb)
 			}
 			distribution = newDist
 		}
@@ -90,13 +84,7 @@ func BackwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 					continue
 				}
 				prob := transProb + nextProb + emitProbsMap[trans.To]
-				if !math.IsInf(prob, -1) {
-					if lastProb, ok := newDist[trans.From]; ok {
-						newDist[trans.From] = addLogs(lastProb, prob)
-					} else {
-						newDist[trans.From] = prob
-					}
-				}
+				addToState(newDist, trans.From, prob)
 			}
 
 			res <- distribution
@@ -246,14 +234,8 @@ func (f *ForwardBackward) CondDist(t int) map[State]map[State]float64 {
 		} else {
 			endProb += bwdDist[trans.To] + emissionDist[trans.To]
 		}
-		if !math.IsInf(endProb, -1) {
-			totals[trans.From] = addLogs(totals[trans.From], endProb)
-			if oldFrom, ok := fromDist[trans.To]; ok {
-				fromDist[trans.To] = addLogs(oldFrom, endProb)
-			} else {
-				fromDist[trans.To] = endProb
-			}
-		}
+		totals[trans.From] = addLogs(totals[trans.From], endProb)
+		addToState(fromDist, trans.To, endProb)
 	}
 
 	// Turn the joints into conditionals.
