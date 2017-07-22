@@ -128,8 +128,7 @@ type ForwardBackward struct {
 	HMM *HMM
 	Obs []Obs
 
-	// Algorithm byproducts (cached values used for
-	// inference).
+	// Cached values used for inference.
 	ForwardOut  []map[State]float64
 	BackwardOut []map[State]float64
 }
@@ -137,7 +136,7 @@ type ForwardBackward struct {
 // NewForwardBackward creates a Smoother that performs hidden
 // state inference given the HMM and the observations.
 func NewForwardBackward(h *HMM, obs []Obs) *ForwardBackward {
-	res := &ForwardBackward{}
+	res := &ForwardBackward{HMM: h, Obs: obs}
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -177,6 +176,91 @@ func (f *ForwardBackward) Dist(t int) map[State]float64 {
 	// Divide by P(X1,...,Xn).
 	for state := range res {
 		res[state] -= probsSum
+	}
+
+	return res
+}
+
+// CondDist returns the conditional distribution of the
+// hidden state at time t, given the all possible hidden
+// states at time t-1.
+// The result maps states at t-1 to distributions over
+// states at time t.
+//
+// If t is equal to the length of the original sequence,
+// then the state after the final state is inferred.
+// The solution in this case is trivial when there is a
+// terminal state.
+//
+// The behavior is undefined if the given hidden state has
+// zero probability.
+func (f *ForwardBackward) CondDist(t int) map[State]map[State]float64 {
+	if t == 0 || t > len(f.Obs) {
+		panic("time out of bounds")
+	}
+
+	// Two distributions that we only need if this is not
+	// the state after the final state.
+	var emissionDist map[State]float64
+	var bwdDist map[State]float64
+	if t < len(f.Obs) {
+		bwdDist = f.BackwardOut[len(f.BackwardOut)-(t+1)]
+
+		var states []State
+		for _, s := range f.HMM.States {
+			states = append(states, s)
+		}
+		probs := f.HMM.Emitter.LogProbs(f.Obs[t], states...)
+		emissionDist = map[State]float64{}
+		for i, state := range states {
+			emissionDist[state] = probs[i]
+		}
+	}
+
+	prevDist := f.Dist(t - 1)
+
+	res := map[State]map[State]float64{}
+	totals := map[State]float64{}
+	for state := range prevDist {
+		res[state] = map[State]float64{}
+		totals[state] = math.Inf(-1)
+	}
+
+	// Compute, for each possible Z pair, P(Z, Z_t-1, X).
+	// We can compute this using the chain rule as:
+	//
+	//     P(Z_t-1 | X_0:t-1) P(Z_t | Z_t-1) P(X_t | Z_t) P(X_t+1:n | Z_t)
+	//
+	// Note that the last two terms do not apply if we are
+	// interested in the state after the sequence.
+	for trans, transProb := range f.HMM.Transitions {
+		fromDist, ok := res[trans.From]
+		if !ok {
+			continue
+		}
+		endProb := prevDist[trans.From] + transProb
+		if t == len(f.Obs) {
+			if f.HMM.TerminalState != nil && trans.To != f.HMM.TerminalState {
+				continue
+			}
+		} else {
+			endProb += bwdDist[trans.To] + emissionDist[trans.To]
+		}
+		if !math.IsInf(endProb, -1) {
+			totals[trans.From] = addLogs(totals[trans.From], endProb)
+			if oldFrom, ok := fromDist[trans.To]; ok {
+				fromDist[trans.To] = addLogs(oldFrom, endProb)
+			} else {
+				fromDist[trans.To] = endProb
+			}
+		}
+	}
+
+	// Turn the joints into conditionals.
+	for from, total := range totals {
+		for to := range res[from] {
+			res[from][to] -= total
+		}
 	}
 
 	return res

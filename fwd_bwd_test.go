@@ -129,7 +129,7 @@ func actualBackwardProbs(h *HMM, out []Obs) []map[State]float64 {
 	return res
 }
 
-func TestForwardBackward(t *testing.T) {
+func TestForwardBackwardDist(t *testing.T) {
 	h := testingHMM()
 	out := []Obs{"x", "z", "y", "x"}
 
@@ -163,4 +163,63 @@ func TestForwardBackward(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestForwardBackwardCondDist(t *testing.T) {
+	h := testingHMM()
+	out := []Obs{"x", "y", "z", "x"}
+
+	actual := actualCondDist(h, out, 2)
+	expected := approxCondDist(h, out, 2)
+
+	for first := range expected {
+		if _, ok := actual[first]; !ok {
+			t.Errorf("missing distribution for %v", first)
+		}
+	}
+
+	for first, dist := range actual {
+		for second, a := range dist {
+			x := expected[first][second]
+			if math.Abs(a-x) > 3e-2 {
+				t.Errorf("P(%v|%v) should be %f but got %f",
+					second, first, x, a)
+			}
+		}
+	}
+}
+
+func approxCondDist(h *HMM, out []Obs, t int) map[State]map[State]float64 {
+	res := map[State]map[State]float64{}
+	counts := map[State]float64{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := sampleConditionalHidden(ctx, h, out)
+	for i := 0; i < 10000; i++ {
+		seq := <-ch
+		first, second := seq[t-1], seq[t]
+		if _, ok := res[first]; !ok {
+			res[first] = map[State]float64{}
+		}
+		res[first][second]++
+		counts[first]++
+	}
+	for first, tally := range counts {
+		for second := range res[first] {
+			res[first][second] /= tally
+		}
+	}
+	return res
+}
+
+func actualCondDist(h *HMM, out []Obs, t int) map[State]map[State]float64 {
+	fb := NewForwardBackward(h, out)
+	res := fb.CondDist(t)
+	for _, dist := range res {
+		for key, val := range dist {
+			dist[key] = math.Exp(val)
+		}
+	}
+	return res
 }
