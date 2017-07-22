@@ -143,6 +143,32 @@ func NewForwardBackward(h *HMM, obs []Obs) *ForwardBackward {
 	return res
 }
 
+// LogLikelihood returns the log-likelihood of the output
+// sequence.
+func (f *ForwardBackward) LogLikelihood() float64 {
+	if len(f.Obs) == 0 {
+		if f.HMM.TerminalState == nil {
+			return 0
+		} else {
+			if prob, ok := f.HMM.Init[f.HMM.TerminalState]; ok {
+				return prob
+			} else {
+				return math.Inf(-1)
+			}
+		}
+	}
+
+	fwdDist := f.ForwardOut[len(f.ForwardOut)-1]
+	bwdDist := f.BackwardOut[0]
+	probsSum := math.Inf(-1)
+	for state, fwdProb := range fwdDist {
+		if bwdProb, ok := bwdDist[state]; ok {
+			probsSum = addLogs(probsSum, fwdProb+bwdProb)
+		}
+	}
+	return probsSum
+}
+
 // Dist returns the distribution of the hidden state at
 // time t.
 //
