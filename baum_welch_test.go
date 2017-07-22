@@ -22,7 +22,7 @@ func TestBaumWelch(t *testing.T) {
 	}
 	for i := 0; i < 3; i++ {
 		oldLikelihood := logLikelihood()
-		h = BaumWelch(h, makeSamples())
+		h = BaumWelch(h, makeSamples(), 0)
 		newLikelihood := logLikelihood()
 		if newLikelihood < oldLikelihood {
 			t.Errorf("expected new likelihood (%f) to be greater than %f", newLikelihood,
