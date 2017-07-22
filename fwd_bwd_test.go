@@ -129,7 +129,7 @@ func actualBackwardProbs(h *HMM, out []Obs) []map[State]float64 {
 	return res
 }
 
-func TestSmoother(t *testing.T) {
+func TestForwardBackward(t *testing.T) {
 	h := testingHMM()
 	out := []Obs{"x", "z", "y", "x"}
 
@@ -142,7 +142,7 @@ func TestSmoother(t *testing.T) {
 	cancel()
 
 	stateToNum := map[State]float64{"A": 0, "B": 1, "C": 2, "D": 3}
-	smoother := NewSmoother(h, out)
+	smoother := NewForwardBackward(h, out)
 	for idx := range out {
 		t.Run(fmt.Sprintf("Time%d", idx), func(t *testing.T) {
 			dist := smoother.Dist(idx)

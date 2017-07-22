@@ -122,17 +122,22 @@ func initialBackwardDist(h *HMM) map[State]float64 {
 	return res
 }
 
-// A Smoother wraps the result of the forward-backward
-// algorithm to perform inference on latent variables.
-type Smoother struct {
+// ForwardBackward is a result from the forward-backward.
+type ForwardBackward struct {
+	// Algorithm inputs.
+	HMM *HMM
+	Obs []Obs
+
+	// Algorithm byproducts (cached values used for
+	// inference).
 	ForwardOut  []map[State]float64
 	BackwardOut []map[State]float64
 }
 
-// NewSmoother creates a Smoother that performs hidden
+// NewForwardBackward creates a Smoother that performs hidden
 // state inference given the HMM and the observations.
-func NewSmoother(h *HMM, obs []Obs) *Smoother {
-	res := &Smoother{}
+func NewForwardBackward(h *HMM, obs []Obs) *ForwardBackward {
+	res := &ForwardBackward{}
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -155,10 +160,10 @@ func NewSmoother(h *HMM, obs []Obs) *Smoother {
 // time t.
 // Each state is mapped to its log probability.
 // States with zero probability may be absent.
-func (s *Smoother) Dist(t int) map[State]float64 {
+func (f *ForwardBackward) Dist(t int) map[State]float64 {
 	res := map[State]float64{}
-	bwdDist := s.BackwardOut[len(s.BackwardOut)-(t+1)]
-	fwdDist := s.ForwardOut[t]
+	bwdDist := f.BackwardOut[len(f.BackwardOut)-(t+1)]
+	fwdDist := f.ForwardOut[t]
 	probsSum := math.Inf(-1)
 	for state, fwdProb := range fwdDist {
 		if bwdProb, ok := bwdDist[state]; ok {
