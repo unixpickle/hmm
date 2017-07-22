@@ -115,7 +115,7 @@ func initialBackwardDist(h *HMM) map[State]float64 {
 		return res
 	}
 	for trans, prob := range h.Transitions {
-		if trans.To == h.TerminalState {
+		if trans.To == h.TerminalState && !math.IsInf(prob, -1) {
 			res[trans.From] = prob
 		}
 	}
@@ -158,8 +158,9 @@ func NewForwardBackward(h *HMM, obs []Obs) *ForwardBackward {
 
 // Dist returns the distribution of the hidden state at
 // time t.
+//
 // Each state is mapped to its log probability.
-// States with zero probability may be absent.
+// States with 0 probability are omitted.
 func (f *ForwardBackward) Dist(t int) map[State]float64 {
 	res := map[State]float64{}
 	bwdDist := f.BackwardOut[len(f.BackwardOut)-(t+1)]
