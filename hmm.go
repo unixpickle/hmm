@@ -42,6 +42,40 @@ type HMM struct {
 	Transitions map[Transition]float64
 }
 
+// RandomHMM creates an HMM with discrete observations and
+// random parameters.
+// The resulting Emitter is a TabularEmitter.
+//
+// This may be used to generate starting points for
+// BaumWelch.
+func RandomHMM(states []State, terminal State, obs []Obs) *HMM {
+	res := &HMM{
+		States:        states,
+		Emitter:       TabularEmitter{},
+		TerminalState: terminal,
+		Init:          map[State]float64{},
+		Transitions:   map[Transition]float64{},
+	}
+	for i, prob := range randomDist(len(states)) {
+		res.Init[states[i]] = prob
+	}
+	emitter := res.Emitter.(TabularEmitter)
+	for _, state := range states {
+		if state == terminal {
+			continue
+		}
+		for i, prob := range randomDist(len(states)) {
+			to := states[i]
+			res.Transitions[Transition{From: state, To: to}] = prob
+		}
+		emitter[state] = map[Obs]float64{}
+		for i, prob := range randomDist(len(obs)) {
+			emitter[state][obs[i]] = prob
+		}
+	}
+	return res
+}
+
 // Sample samples a sequence of observations and hidden
 // states from the model.
 //

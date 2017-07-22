@@ -50,3 +50,20 @@ func addToState(m map[State]float64, s State, prob float64) {
 		m[s] = prob
 	}
 }
+
+// randomDist generates a random probability distribution.
+//
+// The probabilities are expressed in the log domain.
+func randomDist(n int) []float64 {
+	var res []float64
+	sum := math.Inf(-1)
+	for i := 0; i < n; i++ {
+		val := rand.NormFloat64()
+		sum = addLogs(sum, val)
+		res = append(res, val)
+	}
+	for i := range res {
+		res[i] -= sum
+	}
+	return res
+}
