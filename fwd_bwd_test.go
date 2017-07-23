@@ -225,15 +225,38 @@ func actualCondDist(h *HMM, out []Obs, t int) map[State]map[State]float64 {
 }
 
 func BenchmarkNewForwardBackward(b *testing.B) {
+	h, obs := benchmarkingHMM()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		NewForwardBackward(h, obs)
+	}
+}
+
+func BenchmarkForwardProbs(b *testing.B) {
+	h, obs := benchmarkingHMM()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _ = range ForwardProbs(h, obs) {
+		}
+	}
+}
+
+func BenchmarkBackwardProbs(b *testing.B) {
+	h, obs := benchmarkingHMM()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _ = range BackwardProbs(h, obs) {
+		}
+	}
+}
+
+func benchmarkingHMM() (*HMM, []Obs) {
 	states := make([]State, 100)
 	obses := make([]Obs, 100)
 	for i := 0; i < 100; i++ {
 		states[i] = i
 		obses[i] = i
 	}
-	h := RandomHMM(states, 0, obses)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		NewForwardBackward(h, []Obs{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
-	}
+	h := RandomHMM(rand.New(rand.NewSource(1337)), states, 0, obses)
+	return h, []Obs{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 }
