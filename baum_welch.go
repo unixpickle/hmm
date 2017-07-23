@@ -37,33 +37,42 @@ func BaumWelch(h *HMM, data <-chan []Obs, parallelism int) *HMM {
 }
 
 type baumWelch struct {
-	HMM *HMM
+	HMM           *HMM
+	TerminalIndex int
 
-	InitTally map[State]float64
+	InitTally *fastStateMap
 	InitTotal float64
 
-	TransTally      map[Transition]float64
-	FromStateTotals map[State]float64
+	TransTally      []*fastStateMap
+	FromStateTotals *fastStateMap
 
-	EmitTally  TabularEmitter
-	EmitTotals map[State]float64
+	EmitTally  []map[Obs]float64
+	EmitTotals *fastStateMap
 
 	UpdateLock sync.Mutex
 }
 
 func newBaumWelch(h *HMM) *baumWelch {
-	return &baumWelch{
+	b := &baumWelch{
 		HMM: h,
 
-		InitTally: map[State]float64{},
+		InitTally: newFastStateMap(h),
 		InitTotal: math.Inf(-1),
 
-		TransTally:      map[Transition]float64{},
-		FromStateTotals: map[State]float64{},
+		TransTally:      make([]*fastStateMap, len(h.States)),
+		FromStateTotals: newFastStateMap(h),
 
-		EmitTally:  TabularEmitter{},
-		EmitTotals: map[State]float64{},
+		EmitTally:  make([]map[Obs]float64, len(h.States)),
+		EmitTotals: newFastStateMap(h),
 	}
+	for i, state := range h.States {
+		b.TransTally[i] = newFastStateMap(h)
+		b.EmitTally[i] = map[Obs]float64{}
+		if state == h.TerminalState {
+			b.TerminalIndex = i
+		}
+	}
+	return b
 }
 
 func (b *baumWelch) Accumulate(sample []Obs) {
@@ -71,22 +80,20 @@ func (b *baumWelch) Accumulate(sample []Obs) {
 		if b.HMM.TerminalState != nil {
 			b.UpdateLock.Lock()
 			b.InitTotal = addLogs(b.InitTotal, 0)
-			addToState(b.InitTally, b.HMM.TerminalState, 0)
+			b.InitTally.AddLog(b.TerminalIndex, 0)
 			b.UpdateLock.Unlock()
 		}
 		return
 	}
 
 	fb := NewForwardBackward(b.HMM, sample)
-	initDist := fb.Dist(0)
 
-	b.UpdateLock.Lock()
-	b.InitTotal = addLogs(b.InitTotal, 0)
-	for state, prob := range initDist {
-		addToState(b.InitTally, state, prob)
+	var dists []*fastStateMap
+	for t := 0; t < len(sample); t++ {
+		dists = append(dists, newFastStateMapFrom(b.HMM, fb.Dist(t)))
 	}
-	b.UpdateLock.Unlock()
 
+	var condDists [][]*fastStateMap
 	for t := 1; t <= len(sample); t++ {
 		if t == len(sample) && b.HMM.TerminalState == nil {
 			// Looking at the final state transitions don't make
@@ -94,65 +101,79 @@ func (b *baumWelch) Accumulate(sample []Obs) {
 			// next state should be.
 			break
 		}
+		condDists = append(condDists, fb.fastCondDist(t))
+	}
 
-		prevDist := fb.Dist(t - 1)
-		condDist := fb.CondDist(t)
+	b.UpdateLock.Lock()
+	b.InitTotal = addLogs(b.InitTotal, 0)
+	dists[0].Iter(func(state int, val float64) {
+		b.InitTally.AddLog(state, val)
+	})
+	b.UpdateLock.Unlock()
 
-		b.UpdateLock.Lock()
-		for state, prob := range prevDist {
-			addToState(b.FromStateTotals, state, prob)
-		}
-		for from, tos := range condDist {
-			for to, condProb := range tos {
-				joint := condProb + prevDist[from]
-				trans := Transition{From: from, To: to}
-				if oldProb, ok := b.TransTally[trans]; ok {
-					b.TransTally[trans] = addLogs(oldProb, joint)
-				} else {
-					b.TransTally[trans] = joint
-				}
-			}
-		}
-		b.UpdateLock.Unlock()
+	for i, condDist := range condDists {
+		prevDist := dists[i]
+		prevDist.Iter(func(from int, prevProb float64) {
+			b.UpdateLock.Lock()
+			b.FromStateTotals.AddLog(from, prevProb)
+			condDist[from].Iter(func(to int, condProb float64) {
+				joint := condProb + prevProb
+				b.TransTally[from].AddLog(to, joint)
+			})
+			b.UpdateLock.Unlock()
+		})
 	}
 
 	for t, obs := range sample {
-		for state, prob := range fb.Dist(t) {
-			b.UpdateLock.Lock()
-			if _, ok := b.EmitTally[state]; !ok {
-				b.EmitTally[state] = map[Obs]float64{}
-			}
-			addToState(b.EmitTotals, state, prob)
+		b.UpdateLock.Lock()
+		dists[t].Iter(func(state int, prob float64) {
+			b.EmitTotals.AddLog(state, prob)
 			emissions := b.EmitTally[state]
 			if oldProb, ok := emissions[obs]; ok {
 				emissions[obs] = addLogs(oldProb, prob)
 			} else {
 				emissions[obs] = prob
 			}
-			b.UpdateLock.Unlock()
-		}
+		})
+		b.UpdateLock.Unlock()
 	}
 }
 
 func (b *baumWelch) Normalize() {
-	for trans := range b.TransTally {
-		b.TransTally[trans] -= b.FromStateTotals[trans.From]
-	}
-	for state := range b.InitTally {
-		b.InitTally[state] -= b.InitTotal
-	}
-	for state, emissions := range b.EmitTally {
-		total := b.EmitTotals[state]
-		for obs := range emissions {
-			emissions[obs] -= total
+	b.FromStateTotals.Iter(func(from int, total float64) {
+		b.TransTally[from].AddAll(-total)
+	})
+	b.InitTally.AddAll(-b.InitTotal)
+	b.EmitTotals.Iter(func(state int, total float64) {
+		tally := b.EmitTally[state]
+		for obs := range tally {
+			tally[obs] -= total
 		}
-	}
+	})
 }
 
 func (b *baumWelch) Result() *HMM {
 	res := *b.HMM
-	res.Emitter = b.EmitTally
-	res.Transitions = b.TransTally
-	res.Init = b.InitTally
+
+	res.Init = b.InitTally.Map()
+
+	te := TabularEmitter{}
+	for stateIdx, obses := range b.EmitTally {
+		te[b.HMM.States[stateIdx]] = obses
+	}
+	res.Emitter = te
+
+	res.Transitions = map[Transition]float64{}
+	for from, tos := range b.TransTally {
+		fromState := b.HMM.States[from]
+		tos.Iter(func(to int, prob float64) {
+			t := Transition{
+				From: fromState,
+				To:   b.HMM.States[to],
+			}
+			res.Transitions[t] = prob
+		})
+	}
+
 	return &res
 }

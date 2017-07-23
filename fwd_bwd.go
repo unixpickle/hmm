@@ -226,6 +226,26 @@ func (f *ForwardBackward) Dist(t int) map[State]float64 {
 // The behavior is undefined if the given hidden state has
 // zero probability.
 func (f *ForwardBackward) CondDist(t int) map[State]map[State]float64 {
+	fastRes := f.fastCondDist(t)
+	res := map[State]map[State]float64{}
+	for i, state := range f.HMM.States {
+		if fastRes[i] != nil {
+			subMap := map[State]float64{}
+			fastRes[i].Iter(func(state int, val float64) {
+				subMap[f.HMM.States[state]] = val
+			})
+			res[state] = subMap
+		}
+	}
+	return res
+}
+
+// fastCondDist is like CondDist, but it returns a more
+// efficient representation of the resulting distribution.
+// In particular, each from-state index is connected to a
+// potentially nil *fastStateMap from to-states to
+// probabilities.
+func (f *ForwardBackward) fastCondDist(t int) []*fastStateMap {
 	if t == 0 || t > len(f.Obs) {
 		panic("time out of bounds")
 	}
@@ -279,14 +299,9 @@ func (f *ForwardBackward) CondDist(t int) map[State]map[State]float64 {
 	}
 
 	// Turn the joints into conditionals.
-	res := map[State]map[State]float64{}
 	totals.Iter(func(from int, total float64) {
-		subMap := map[State]float64{}
-		fromDists[from].Iter(func(to int, val float64) {
-			subMap[f.HMM.States[to]] = val - total
-		})
-		res[f.HMM.States[from]] = subMap
+		fromDists[from].AddAll(-total)
 	})
 
-	return res
+	return fromDists
 }

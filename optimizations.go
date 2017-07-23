@@ -101,6 +101,15 @@ func (f *fastStateMap) AddLog(state int, x float64) {
 	}
 }
 
+// AddAll adds the value to every entry.
+func (f *fastStateMap) AddAll(x float64) {
+	for i, present := range f.present {
+		if present {
+			f.values[i] += x
+		}
+	}
+}
+
 // Iter iterates over the entries of f.
 func (f *fastStateMap) Iter(handler func(state int, val float64)) {
 	for i, present := range f.present {
