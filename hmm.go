@@ -46,9 +46,12 @@ type HMM struct {
 // random parameters.
 // The resulting Emitter is a TabularEmitter.
 //
-// This may be used to generate starting points for
+// If gen is non-nil, it is used to generate all of the
+// random parameters.
+//
+// RandomHMM may be used to generate starting points for
 // BaumWelch.
-func RandomHMM(states []State, terminal State, obs []Obs) *HMM {
+func RandomHMM(gen *rand.Rand, states []State, terminal State, obs []Obs) *HMM {
 	res := &HMM{
 		States:        states,
 		Emitter:       TabularEmitter{},
@@ -56,7 +59,7 @@ func RandomHMM(states []State, terminal State, obs []Obs) *HMM {
 		Init:          map[State]float64{},
 		Transitions:   map[Transition]float64{},
 	}
-	for i, prob := range randomDist(len(states)) {
+	for i, prob := range randomDist(gen, len(states)) {
 		res.Init[states[i]] = prob
 	}
 	emitter := res.Emitter.(TabularEmitter)
@@ -64,12 +67,12 @@ func RandomHMM(states []State, terminal State, obs []Obs) *HMM {
 		if state == terminal {
 			continue
 		}
-		for i, prob := range randomDist(len(states)) {
+		for i, prob := range randomDist(gen, len(states)) {
 			to := states[i]
 			res.Transitions[Transition{From: state, To: to}] = prob
 		}
 		emitter[state] = map[Obs]float64{}
-		for i, prob := range randomDist(len(obs)) {
+		for i, prob := range randomDist(gen, len(obs)) {
 			emitter[state][obs[i]] = prob
 		}
 	}

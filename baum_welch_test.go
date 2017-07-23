@@ -12,7 +12,7 @@ func TestBaumWelch(t *testing.T) {
 		close(res)
 		return res
 	}
-	h := RandomHMM(states, 9, obses)
+	h := RandomHMM(nil, states, 9, obses)
 	logLikelihood := func() float64 {
 		var product float64
 		for sample := range makeSamples() {
