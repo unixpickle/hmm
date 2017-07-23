@@ -16,15 +16,19 @@ import (
 // which is fed len(obs) items.
 // The caller may modify the returned maps.
 func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
-	res := make(chan map[State]float64, 1)
 	if len(obs) == 0 {
+		res := make(chan map[State]float64)
 		close(res)
 		return res
 	}
+	return forwardProbs(newHMMCache(h), h, obs)
+}
+
+func forwardProbs(c *hmmCache, h *HMM, obs []Obs) <-chan map[State]float64 {
+	res := make(chan map[State]float64, 1)
 	go func() {
 		defer close(res)
 		distribution := newFastStateMapFrom(h, h.Init)
-		transitions := fastTransitions(h, statesToIndices(h))
 		for _, o := range obs {
 			// Compute P(X_i | Z_i)
 			emitProbs := h.Emitter.LogProbs(o, h.States...)
@@ -41,7 +45,7 @@ func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 
 			// Compute P(X_0:i, Z_i+1) for all Z_i+1
 			newDist := newFastStateMap(h)
-			for _, trans := range transitions {
+			for _, trans := range c.Transitions {
 				prior, hasPrior := distribution.Get(trans.From)
 				if !hasPrior {
 					continue
@@ -65,23 +69,26 @@ func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 // See ForwardProbs for more on how to use the resulting
 // channel.
 func BackwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
-	res := make(chan map[State]float64, 1)
 	if len(obs) == 0 {
+		res := make(chan map[State]float64)
 		close(res)
 		return res
 	}
+	return backwardProbs(newHMMCache(h), h, obs)
+}
+
+func backwardProbs(c *hmmCache, h *HMM, obs []Obs) <-chan map[State]float64 {
+	res := make(chan map[State]float64, 1)
 	go func() {
 		defer close(res)
-		s2i := statesToIndices(h)
-		transitions := fastTransitions(h, s2i)
-		distribution := initialBackwardDist(h, s2i, transitions)
+		distribution := initialBackwardDist(c, h)
 		for i := len(obs) - 1; i >= 0; i-- {
 			// Compute P(X_i | Z_i)
 			emitProbs := h.Emitter.LogProbs(obs[i], h.States...)
 
 			// Compute P(X_i:n | Z_i-1) for all Z_i-1.
 			newDist := newFastStateMap(h)
-			for _, trans := range transitions {
+			for _, trans := range c.Transitions {
 				nextProb, hasNextProb := distribution.Get(trans.To)
 				if !hasNextProb {
 					continue
@@ -97,8 +104,7 @@ func BackwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 	return res
 }
 
-func initialBackwardDist(h *HMM, s2i map[State]int,
-	trans []fastTransition) *fastStateMap {
+func initialBackwardDist(c *hmmCache, h *HMM) *fastStateMap {
 	res := newFastStateMap(h)
 	if h.TerminalState == nil {
 		for i := range h.States {
@@ -106,8 +112,8 @@ func initialBackwardDist(h *HMM, s2i map[State]int,
 		}
 		return res
 	}
-	terminalIdx := s2i[h.TerminalState]
-	for _, trans := range trans {
+	terminalIdx := c.S2I[h.TerminalState]
+	for _, trans := range c.Transitions {
 		if trans.To == terminalIdx && !math.IsInf(trans.Prob, -1) {
 			res.Set(trans.From, trans.Prob)
 		}
@@ -124,22 +130,28 @@ type ForwardBackward struct {
 	// Cached values used for inference.
 	ForwardOut  []map[State]float64
 	BackwardOut []map[State]float64
+
+	cache *hmmCache
 }
 
 // NewForwardBackward creates a Smoother that performs hidden
 // state inference given the HMM and the observations.
 func NewForwardBackward(h *HMM, obs []Obs) *ForwardBackward {
-	res := &ForwardBackward{HMM: h, Obs: obs}
+	res := &ForwardBackward{
+		HMM:   h,
+		Obs:   obs,
+		cache: newHMMCache(h),
+	}
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
-		for fwdOut := range ForwardProbs(h, obs) {
+		for fwdOut := range forwardProbs(res.cache, h, obs) {
 			res.ForwardOut = append(res.ForwardOut, fwdOut)
 		}
 		wg.Done()
 	}()
 	go func() {
-		for bwdOut := range BackwardProbs(h, obs) {
+		for bwdOut := range backwardProbs(res.cache, h, obs) {
 			res.BackwardOut = append(res.BackwardOut, bwdOut)
 		}
 		wg.Done()

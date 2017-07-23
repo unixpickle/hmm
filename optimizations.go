@@ -2,6 +2,21 @@ package hmm
 
 import "math"
 
+// hmmCache caches a fast transition matrix and a state to
+// index mapping.
+type hmmCache struct {
+	S2I         map[State]int
+	Transitions []fastTransition
+}
+
+func newHMMCache(h *HMM) *hmmCache {
+	s2i := statesToIndices(h)
+	return &hmmCache{
+		S2I:         s2i,
+		Transitions: fastTransitions(h, s2i),
+	}
+}
+
 // statesToIndices creates a mapping from states to their
 // indices in an HMM.
 func statesToIndices(h *HMM) map[State]int {
