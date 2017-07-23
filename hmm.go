@@ -1,10 +1,18 @@
 package hmm
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
+
+	"github.com/unixpickle/essentials"
+	"github.com/unixpickle/serializer"
 )
+
+func init() {
+	serializer.RegisterTypedDeserializer((&HMM{}).SerializerType(), DeserializeHMM)
+}
 
 // State is a discrete state in an HMM.
 // States must be comparable with the == operator.
@@ -40,6 +48,52 @@ type HMM struct {
 	// allowed transition.
 	// If a transition is absent, it has 0 probability.
 	Transitions map[Transition]float64
+}
+
+// DeserializeHMM deserializes an HMM.
+func DeserializeHMM(d []byte) (h *HMM, err error) {
+	defer essentials.AddCtxTo("deserialize HMM", &err)
+
+	var terminalIdx int
+	var states []serializer.Serializer
+	var initStates []serializer.Serializer
+	var initProbs []float64
+	var transitionStates []serializer.Serializer
+	var transitionProbs []float64
+	var emitter Emitter
+	err = serializer.DeserializeAny(d, &terminalIdx, &states, &initStates, &initProbs,
+		&transitionStates, &transitionProbs, &emitter)
+	if err != nil {
+		return nil, err
+	}
+	if len(transitionStates)%2 != 0 || len(transitionProbs) != len(transitionStates)/2 ||
+		len(initProbs) != len(initStates) || terminalIdx >= len(states) {
+		return nil, errors.New("invalid slice size")
+	} else if !serializersComparable(states, initStates, transitionStates) {
+		return nil, errors.New("State or Obs not comparable")
+	}
+	h = &HMM{
+		Emitter:     emitter,
+		Init:        map[State]float64{},
+		Transitions: map[Transition]float64{},
+	}
+	if terminalIdx >= 0 {
+		h.TerminalState = states[terminalIdx]
+	}
+	for _, state := range states {
+		h.States = append(h.States, state)
+	}
+	for i, prob := range transitionProbs {
+		t := Transition{
+			From: transitionStates[i*2],
+			To:   transitionStates[i*2+1],
+		}
+		h.Transitions[t] = prob
+	}
+	for i, state := range initStates {
+		h.Init[state] = initProbs[i]
+	}
+	return h, nil
 }
 
 // RandomHMM creates an HMM with discrete observations and
@@ -144,6 +198,47 @@ func (h *HMM) sampleStart(gen *rand.Rand) State {
 		probs = append(probs, math.Exp(logProb))
 	}
 	return states[sampleIndex(gen, probs)]
+}
+
+// SerializerType returns the unique ID used to serialize
+// an HMM with the serializer package.
+func (h *HMM) SerializerType() string {
+	return "github.com/unixpickle/hmm.HMM"
+}
+
+// Serialize serializes the HMM.
+//
+// This requires that the States and Emitter implement the
+// serializer.Serializer interface.
+func (h *HMM) Serialize() (data []byte, err error) {
+	defer essentials.AddCtxTo("serialize HMM", &err)
+	terminalIdx := -1
+	var states []serializer.Serializer
+	var initStates []serializer.Serializer
+	var initProbs []float64
+	var transitionStates []serializer.Serializer
+	var transitionProbs []float64
+	for i, state := range h.States {
+		stateSer, ok := state.(serializer.Serializer)
+		if !ok {
+			return nil, fmt.Errorf("not a Serializer: %T", state)
+		}
+		states = append(states, stateSer)
+		if state == h.TerminalState {
+			terminalIdx = i
+		}
+	}
+	for state, prob := range h.Init {
+		initStates = append(initStates, state.(serializer.Serializer))
+		initProbs = append(initProbs, prob)
+	}
+	for trans, prob := range h.Transitions {
+		transitionStates = append(transitionStates, trans.From.(serializer.Serializer),
+			trans.To.(serializer.Serializer))
+		transitionProbs = append(transitionProbs, prob)
+	}
+	return serializer.SerializeAny(terminalIdx, states, initStates, initProbs,
+		transitionStates, transitionProbs, h.Emitter)
 }
 
 type transSampler struct {

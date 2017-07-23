@@ -3,6 +3,9 @@ package hmm
 import (
 	"math"
 	"math/rand"
+	"reflect"
+
+	"github.com/unixpickle/serializer"
 )
 
 // sampleIndex samples an index from the list, given the
@@ -71,4 +74,15 @@ func randomDist(gen *rand.Rand, n int) []float64 {
 		res[i] -= sum
 	}
 	return res
+}
+
+func serializersComparable(slices ...[]serializer.Serializer) bool {
+	for _, slice := range slices {
+		for _, item := range slice {
+			if !reflect.TypeOf(item).Comparable() {
+				return false
+			}
+		}
+	}
+	return true
 }
