@@ -13,7 +13,7 @@ import (
 
 const (
 	TestSamples   = 2000000
-	TestThreshold = 0.001
+	TestThreshold = 0.002
 )
 
 func TestForwardProbs(t *testing.T) {
