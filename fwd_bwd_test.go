@@ -260,14 +260,3 @@ func BenchmarkForwardBackwardCondProb(b *testing.B) {
 		}
 	}
 }
-
-func benchmarkingHMM() (*HMM, []Obs) {
-	states := make([]State, 100)
-	obses := make([]Obs, 100)
-	for i := 0; i < 100; i++ {
-		states[i] = i
-		obses[i] = i
-	}
-	h := RandomHMM(rand.New(rand.NewSource(1337)), states, 0, obses)
-	return h, []Obs{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-}

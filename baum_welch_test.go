@@ -30,3 +30,18 @@ func TestBaumWelch(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkBaumWelch(b *testing.B) {
+	h, obs := benchmarkingHMM()
+	makeSamples := func() <-chan []Obs {
+		res := make(chan []Obs, 2)
+		res <- obs
+		res <- obs
+		close(res)
+		return res
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		BaumWelch(h, makeSamples(), 1)
+	}
+}
