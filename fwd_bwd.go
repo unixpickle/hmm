@@ -17,36 +17,37 @@ import (
 // The caller may modify the returned maps.
 func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 	res := make(chan map[State]float64, 1)
+	if len(obs) == 0 {
+		close(res)
+		return res
+	}
 	go func() {
 		defer close(res)
-		distribution := h.Init
+		distribution := newFastStateMapFrom(h, h.Init)
+		transitions := fastTransitions(h, statesToIndices(h))
 		for _, o := range obs {
 			// Compute P(X_i | Z_i)
 			emitProbs := h.Emitter.LogProbs(o, h.States...)
-			emitProbsMap := map[State]float64{}
-			for i, state := range h.States {
-				emitProbsMap[state] = emitProbs[i]
-			}
 
 			// Compute P(X_0:i, Z_i) from P(X_0:i-1, Z_i)
 			outJoints := map[State]float64{}
-			for state, prior := range distribution {
-				prob := prior + emitProbsMap[state]
+			distribution.Iter(func(state int, prior float64) {
+				prob := prior + emitProbs[state]
 				if !math.IsInf(prob, -1) {
-					outJoints[state] = prob
+					outJoints[h.States[state]] = prob
 				}
-			}
+			})
 			res <- outJoints
 
 			// Compute P(X_0:i, Z_i+1) for all Z_i+1
-			newDist := map[State]float64{}
-			for trans, transProb := range h.Transitions {
-				prior, hasPrior := distribution[trans.From]
+			newDist := newFastStateMap(h)
+			for _, trans := range transitions {
+				prior, hasPrior := distribution.Get(trans.From)
 				if !hasPrior {
 					continue
 				}
-				destProb := prior + transProb + emitProbsMap[trans.From]
-				addToState(newDist, trans.To, destProb)
+				destProb := prior + trans.Prob + emitProbs[trans.From]
+				newDist.AddLog(trans.To, destProb)
 			}
 			distribution = newDist
 		}
@@ -65,46 +66,50 @@ func ForwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 // channel.
 func BackwardProbs(h *HMM, obs []Obs) <-chan map[State]float64 {
 	res := make(chan map[State]float64, 1)
+	if len(obs) == 0 {
+		close(res)
+		return res
+	}
 	go func() {
 		defer close(res)
-		distribution := initialBackwardDist(h)
+		s2i := statesToIndices(h)
+		transitions := fastTransitions(h, s2i)
+		distribution := initialBackwardDist(h, s2i, transitions)
 		for i := len(obs) - 1; i >= 0; i-- {
 			// Compute P(X_i | Z_i)
 			emitProbs := h.Emitter.LogProbs(obs[i], h.States...)
-			emitProbsMap := map[State]float64{}
-			for i, state := range h.States {
-				emitProbsMap[state] = emitProbs[i]
-			}
 
 			// Compute P(X_i:n | Z_i-1) for all Z_i-1.
-			newDist := map[State]float64{}
-			for trans, transProb := range h.Transitions {
-				nextProb, hasNextProb := distribution[trans.To]
+			newDist := newFastStateMap(h)
+			for _, trans := range transitions {
+				nextProb, hasNextProb := distribution.Get(trans.To)
 				if !hasNextProb {
 					continue
 				}
-				prob := transProb + nextProb + emitProbsMap[trans.To]
-				addToState(newDist, trans.From, prob)
+				prob := trans.Prob + nextProb + emitProbs[trans.To]
+				newDist.AddLog(trans.From, prob)
 			}
 
-			res <- distribution
+			res <- distribution.Map()
 			distribution = newDist
 		}
 	}()
 	return res
 }
 
-func initialBackwardDist(h *HMM) map[State]float64 {
-	res := map[State]float64{}
+func initialBackwardDist(h *HMM, s2i map[State]int,
+	trans []fastTransition) *fastStateMap {
+	res := newFastStateMap(h)
 	if h.TerminalState == nil {
-		for _, state := range h.States {
-			res[state] = 0
+		for i := range h.States {
+			res.Set(i, 0)
 		}
 		return res
 	}
-	for trans, prob := range h.Transitions {
-		if trans.To == h.TerminalState && !math.IsInf(prob, -1) {
-			res[trans.From] = prob
+	terminalIdx := s2i[h.TerminalState]
+	for _, trans := range trans {
+		if trans.To == terminalIdx && !math.IsInf(trans.Prob, -1) {
+			res.Set(trans.From, trans.Prob)
 		}
 	}
 	return res
