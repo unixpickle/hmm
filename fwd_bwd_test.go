@@ -250,6 +250,17 @@ func BenchmarkBackwardProbs(b *testing.B) {
 	}
 }
 
+func BenchmarkForwardBackwardCondProb(b *testing.B) {
+	h, obs := benchmarkingHMM()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fb := NewForwardBackward(h, obs)
+		for t := 1; t <= len(obs); t++ {
+			fb.CondDist(t)
+		}
+	}
+}
+
 func benchmarkingHMM() (*HMM, []Obs) {
 	states := make([]State, 100)
 	obses := make([]Obs, 100)

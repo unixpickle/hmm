@@ -232,30 +232,21 @@ func (f *ForwardBackward) CondDist(t int) map[State]map[State]float64 {
 
 	// Two distributions that we only need if this is not
 	// the state after the final state.
-	var emissionDist map[State]float64
-	var bwdDist map[State]float64
+	var emissionDist []float64
+	var bwdDist *fastStateMap
 	if t < len(f.Obs) {
-		bwdDist = f.BackwardOut[len(f.BackwardOut)-(t+1)]
-
-		var states []State
-		for _, s := range f.HMM.States {
-			states = append(states, s)
-		}
-		probs := f.HMM.Emitter.LogProbs(f.Obs[t], states...)
-		emissionDist = map[State]float64{}
-		for i, state := range states {
-			emissionDist[state] = probs[i]
-		}
+		bwd := f.BackwardOut[len(f.BackwardOut)-(t+1)]
+		bwdDist = newFastStateMapFrom(f.HMM, bwd)
+		emissionDist = f.HMM.Emitter.LogProbs(f.Obs[t], f.HMM.States...)
 	}
 
-	prevDist := f.Dist(t - 1)
+	prevDist := newFastStateMapFrom(f.HMM, f.Dist(t-1))
 
-	res := map[State]map[State]float64{}
-	totals := map[State]float64{}
-	for state := range prevDist {
-		res[state] = map[State]float64{}
-		totals[state] = math.Inf(-1)
-	}
+	fromDists := make([]*fastStateMap, len(f.HMM.States))
+	totals := newFastStateMap(f.HMM)
+	prevDist.Iter(func(state int, val float64) {
+		fromDists[state] = newFastStateMap(f.HMM)
+	})
 
 	// Compute, for each possible Z pair, P(Z, Z_t-1, X).
 	// We can compute this using the chain rule as:
@@ -264,29 +255,38 @@ func (f *ForwardBackward) CondDist(t int) map[State]map[State]float64 {
 	//
 	// Note that the last two terms do not apply if we are
 	// interested in the state after the sequence.
-	for trans, transProb := range f.HMM.Transitions {
-		fromDist, ok := res[trans.From]
-		if !ok {
+	for _, trans := range f.cache.Transitions {
+		prevProb, hasPrev := prevDist.Get(trans.From)
+		if !hasPrev {
 			continue
 		}
-		endProb := prevDist[trans.From] + transProb
+		fromDist := fromDists[trans.From]
+		endProb := prevProb + trans.Prob
 		if t == len(f.Obs) {
-			if f.HMM.TerminalState != nil && trans.To != f.HMM.TerminalState {
+			if f.HMM.TerminalState != nil &&
+				trans.To != f.cache.S2I[f.HMM.TerminalState] {
 				continue
 			}
 		} else {
-			endProb += bwdDist[trans.To] + emissionDist[trans.To]
+			bwdProb, hasBwd := bwdDist.Get(trans.To)
+			if !hasBwd {
+				continue
+			}
+			endProb += bwdProb + emissionDist[trans.To]
 		}
-		totals[trans.From] = addLogs(totals[trans.From], endProb)
-		addToState(fromDist, trans.To, endProb)
+		totals.AddLog(trans.From, endProb)
+		fromDist.AddLog(trans.To, endProb)
 	}
 
 	// Turn the joints into conditionals.
-	for from, total := range totals {
-		for to := range res[from] {
-			res[from][to] -= total
-		}
-	}
+	res := map[State]map[State]float64{}
+	totals.Iter(func(from int, total float64) {
+		subMap := map[State]float64{}
+		fromDists[from].Iter(func(to int, val float64) {
+			subMap[f.HMM.States[to]] = val - total
+		})
+		res[f.HMM.States[from]] = subMap
+	})
 
 	return res
 }
