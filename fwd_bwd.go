@@ -121,6 +121,41 @@ func initialBackwardDist(c *hmmCache, h *HMM) *fastStateMap {
 	return res
 }
 
+// LogLikelihood computes the log-likelihood of the
+// observation sequence.
+// It is faster than creating a new ForwardBackward and
+// calling LogLikelihood on the result.
+func LogLikelihood(h *HMM, obs []Obs) float64 {
+	if len(obs) == 0 {
+		if h.TerminalState == nil {
+			return 0
+		} else {
+			if prob, ok := h.Init[h.TerminalState]; ok {
+				return prob
+			} else {
+				return math.Inf(-1)
+			}
+		}
+	}
+
+	cache := newHMMCache(h)
+
+	firstBwdFwd := initialBackwardDist(cache, h).Map()
+	lastFwdBwd := map[State]float64{}
+	for dist := range forwardProbs(cache, h, obs) {
+		lastFwdBwd = dist
+	}
+
+	// Marginalize over all possible Z_final.
+	sum := math.Inf(-1)
+	for state, fwdProb := range lastFwdBwd {
+		if prob, ok := firstBwdFwd[state]; ok {
+			sum = addLogs(sum, prob+fwdProb)
+		}
+	}
+	return sum
+}
+
 // ForwardBackward is a result from the forward-backward.
 type ForwardBackward struct {
 	// Algorithm inputs.

@@ -129,6 +129,23 @@ func actualBackwardProbs(h *HMM, out []Obs) []map[State]float64 {
 	return res
 }
 
+func TestForwardBackwardLogLikelihood(t *testing.T) {
+	h := testingHMM()
+	seqs := [][]Obs{
+		{},
+		{"x", "z", "y", "x"},
+		{"y"},
+		{"y", "z", "x"},
+	}
+	for _, seq := range seqs {
+		actual := NewForwardBackward(h, seq).LogLikelihood()
+		expected := LogLikelihood(h, seq)
+		if math.Abs(actual-expected) > 1e-4 {
+			t.Errorf("sequence %v: expected %f but got %f", seq, expected, actual)
+		}
+	}
+}
+
 func TestForwardBackwardDist(t *testing.T) {
 	h := testingHMM()
 	out := []Obs{"x", "z", "y", "x"}
