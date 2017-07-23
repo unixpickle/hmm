@@ -223,3 +223,17 @@ func actualCondDist(h *HMM, out []Obs, t int) map[State]map[State]float64 {
 	}
 	return res
 }
+
+func BenchmarkNewForwardBackward(b *testing.B) {
+	states := make([]State, 100)
+	obses := make([]Obs, 100)
+	for i := 0; i < 100; i++ {
+		states[i] = i
+		obses[i] = i
+	}
+	h := RandomHMM(states, 0, obses)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		NewForwardBackward(h, []Obs{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+	}
+}
